@@ -122,7 +122,7 @@ def process(text):
 # HANDLERS
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send me your shopee link(s) and I’ll convert them 🔗. I can convert up to 5 links at a go.")
+    await update.message.reply_text("👋🏼 send me your shopee link(s) and I’ll convert them for you 🌼 convert up to 5 links at a go.")
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,7 +131,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     links = extract_links(text)
 
     if not links:
-        await update.message.reply_text("I only recognise a shopee link!")
+        await update.message.reply_text("‼️I only recognise a shopee link. Paste your shopee link below and hit send. I'll reply you with the converted link which you can then add to cart. If there's a follower voucher, the voucher will automatically be applied in your cart. ")
         return
 
     results = process(text)
@@ -140,7 +140,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = [r for r in results if r]
 
     if not results:
-        await update.message.reply_text("Bumped into some error! Do DM the links via IG or telegram to @jacquelynedna instead.")
+        await update.message.reply_text("Sorry, the system bumped into some error. Please check that it's a valid shopee link! Alternatively, you can also DM the links to me via my IG or telegram @jacquelynedna.")
         return
 
     await update.message.reply_text("\n\n".join(results))
