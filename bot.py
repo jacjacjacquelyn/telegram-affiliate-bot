@@ -114,11 +114,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
-    # basic validation
-    if "shopee" not in text:
-        await update.message.reply_text("⚠️ Please send Shopee links only.")
-        return
-
     links = extract_links(text)
 
     if not links:
