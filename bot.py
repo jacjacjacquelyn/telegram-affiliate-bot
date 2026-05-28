@@ -1,119 +1,147 @@
+import os
 import re
+import time
+import hmac
+import hashlib
 import requests
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 
-TOKEN = "8542549078:AAH52vzek5w5wqIxppbwhIqEY4FSinnttR8"
-AFFILIATE_ID = "14392540000"
+# ======================
+# ENV VARIABLES (RAILWAY)
+# ======================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+APP_ID = os.getenv("SHOPEE_APP_ID")
+APP_SECRET = os.getenv("SHOPEE_SECRET")
 
-def resolve_url(url):
-    """
-    Expands Shopee short links (s.shopee.sg / shp.ee)
-    """
+GRAPHQL_ENDPOINT = "https://affiliate.shopee.sg/open_api/graphql"
+
+# ======================
+# CLEAN LINK EXTRACTION
+# ======================
+def extract_links(text: str, limit=5):
+    return re.findall(r"https?://[^\s]+", text)[:limit]
+
+# ======================
+# SIGNATURE (SHOPEE)
+# ======================
+def generate_sign(timestamp: int):
+    base_string = f"{APP_ID}{timestamp}"
+    return hmac.new(
+        APP_SECRET.encode(),
+        base_string.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+# ======================
+# SHOPEE AFFILIATE CALL
+# ======================
+def generate_affiliate_link(url: str):
     try:
-        session = requests.Session()
-        response = session.get(
-            url,
-            allow_redirects=True,
-            timeout=10,
-            headers={"User-Agent": "Mozilla/5.0"}
+        timestamp = int(time.time())
+        sign = generate_sign(timestamp)
+
+        query = f"""
+        mutation {{
+          generateShortLink(originUrl: "{url}") {{
+            shortLink
+          }}
+        }}
+        """
+
+        headers = {
+            "Content-Type": "application/json",
+            "AppId": APP_ID,
+            "Timestamp": str(timestamp),
+            "Signature": sign
+        }
+
+        response = requests.post(
+            GRAPHQL_ENDPOINT,
+            json={"query": query},
+            headers=headers,
+            timeout=10
         )
-        return response.url
-    except Exception as e:
-        print("Resolve error:", e)
+
+        data = response.json()
+
+        # SAFE extraction
+        result = data.get("data", {}).get("generateShortLink", {})
+        short_link = result.get("shortLink")
+
+        # fallback safety
+        if short_link:
+            return short_link
+
         return None
 
+    except Exception as e:
+        print("API ERROR:", e)
+        return None
 
-# =========================
-# EXTRACT PRODUCT IDS
-# =========================
-def extract_ids(url):
-    """
-    Supports multiple Shopee formats:
-    1. i.shop.item
-    2. /product/shop/item
-    """
+# ======================
+# FORMAT FOR CREATORS (OPTIONAL UPGRADE)
+# ======================
+def format_for_creators(links):
+    output = ["🛍️ Affiliate Picks:\n"]
 
-    print("Extracting from:", url)
+    for i, link in enumerate(links, 1):
+        output.append(f"{i}. 🔗 {link}")
 
-    # Format 1: i.shop.item
-    match = re.search(r"i\.(\d+)\.(\d+)", url)
-    if match:
-        return match.group(1), match.group(2)
+    output.append("\n✨ Save & share this list")
+    return "\n".join(output)
 
-    # Format 2: /product/shop/item
-    match = re.search(r"product/(\d+)/(\d+)", url)
-    if match:
-        return match.group(1), match.group(2)
-
-    # Fallback (sometimes Shopee hides structure)
-    match = re.search(r"(\d{8,})", url)
-    if match:
-        return match.group(1), "0"
-
-    return None, None
-
-
-# =========================
-# BUILD AFFILIATE LINK
-# =========================
-def build_affiliate_link(shop_id, item_id):
-    return f"https://shopee.sg/product/{shop_id}/{item_id}?af_siteid={AFFILIATE_ID}"
-
-
-# =========================
-# BOT COMMANDS
-# =========================
+# ======================
+# TELEGRAM HANDLERS
+# ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Send me a Shopee product link and I’ll convert it into an affiliate link 🔗"
+        "👋 Send me up to 5 Shopee links and I’ll convert them into affiliate short links 🔗"
     )
 
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    text = update.message.text
 
-    print("RAW INPUT:", text)
-
-    # Step 1: handle short links
-    if "s.shopee.sg" in text or "shp.ee" in text:
-        resolved = resolve_url(text)
-        print("RESOLVED URL:", resolved)
-
-        if resolved:
-            text = resolved
-        else:
-            await update.message.reply_text("⚠️ Could not resolve Shopee link.")
-            return
-
-    # Step 2: extract IDs
-    shop_id, item_id = extract_ids(text)
-
-    if not shop_id or not item_id:
-        await update.message.reply_text(
-            "⚠️ I couldn’t extract a valid Shopee product.\n"
-            "Try sending a full Shopee product link instead."
-        )
+    # basic validation
+    if "shopee" not in text:
+        await update.message.reply_text("⚠️ Please send Shopee links only.")
         return
 
-    # Step 3: build affiliate link
-    affiliate_link = build_affiliate_link(shop_id, item_id)
+    links = extract_links(text)
 
-    await update.message.reply_text(f"🔗 Your affiliate link:\n{affiliate_link}")
+    if not links:
+        await update.message.reply_text("⚠️ No valid links found.")
+        return
 
+    results = []
 
-# =========================
-# MAIN
-# =========================
+    for link in links:
+        affiliate = generate_affiliate_link(link)
+        if affiliate:
+            results.append(affiliate)
+
+    if not results:
+        await update.message.reply_text("⚠️ Could not generate affiliate links.")
+        return
+
+    # ======================
+    # CREATOR MODE OUTPUT
+    # ======================
+    message = format_for_creators(results)
+
+    await update.message.reply_text(message)
+
+# ======================
+# MAIN APP
+# ======================
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot running...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
