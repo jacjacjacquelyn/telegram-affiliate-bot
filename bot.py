@@ -20,7 +20,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
 
-GRAPHQL_ENDPOINT = "https://affiliate.shopee.sg/open_api/graphql"
+GRAPHQL_ENDPOINT = "https://affiliate.shopee.sg/api/v2/short_link/generate"
 
 
 # ======================
@@ -58,19 +58,13 @@ def generate_signature(app_id: str, app_secret: str, timestamp: int):
 # ======================
 def generate_short_link(url: str):
     if not APP_ID or not APP_SECRET:
-        raise ValueError("Missing APP_ID or APP_SECRET in environment variables")
+        raise ValueError("Missing credentials")
 
     timestamp = int(time.time())
     sign = generate_signature(APP_ID, APP_SECRET, timestamp)
 
     payload = {
-        "query": f"""
-        mutation {{
-            generateShortLink(originUrl: "{url}") {{
-                shortLink
-            }}
-        }}
-        """
+        "origin_url": url
     }
 
     headers = {
@@ -81,10 +75,10 @@ def generate_short_link(url: str):
     }
 
     r = requests.post(
-        GRAPHQL_ENDPOINT,
+        "https://affiliate.shopee.sg/api/v2/short_link/generate",
         json=payload,
         headers=headers,
-        timeout=10,
+        timeout=10
     )
 
     print("STATUS:", r.status_code)
@@ -92,9 +86,8 @@ def generate_short_link(url: str):
 
     data = r.json()
 
-    return data["data"]["generateShortLink"]["shortLink"]
-
-
+    return data.get("short_link")
+    
 # ======================
 # PROCESS LINKS
 # ======================
