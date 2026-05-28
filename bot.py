@@ -1,115 +1,83 @@
 import os
 import re
 import requests
-import time
-import hmac
-import hashlib
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# =====================
+# ======================
 # ENV
-# =====================
+# ======================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-APP_ID = os.getenv("APP_ID")
-APP_SECRET = os.getenv("APP_SECRET")
+AFFILIATE_ID = os.getenv("APP_ID")  # your af_siteid
 
-API_URL = "https://affiliate.shopee.sg/open_api/graphql"
-
-# =====================
+# ======================
 # EXTRACT LINKS
-# =====================
+# ======================
 def extract_links(text):
     return re.findall(r"https?://[^\s]+", text or "")
 
-# =====================
-# RESOLVE SHORT LINK
-# =====================
-def resolve(url):
+# ======================
+# EXPAND SHORT LINKS
+# ======================
+def expand_link(url):
     try:
-        r = requests.get(url, allow_redirects=True, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        r = requests.get(url, allow_redirects=True, timeout=10)
         return r.url
     except:
         return url
 
-# =====================
-# SIGNATURE
-# =====================
-def sign(timestamp: int):
-    base = f"{APP_ID}{timestamp}"
-    return hmac.new(
-        APP_SECRET.encode(),
-        base.encode(),
-        hashlib.sha256
-    ).hexdigest()
+# ======================
+# ADD AFFILIATE TAG
+# ======================
+def make_affiliate(url):
+    if "af_siteid" in url:
+        return url
 
-# =====================
-# SHOPEE SHORT LINK API
-# =====================
-def generate_short_link(url: str):
-    try:
-        ts = int(time.time())
-        signature = sign(ts)
+    connector = "&" if "?" in url else "?"
+    return f"{url}{connector}af_siteid={AFFILIATE_ID}"
 
-        query = f"""
-        mutation {{
-          generateShortLink(originUrl: "{url}") {{
-            shortLink
-          }}
-        }}
-        """
-
-        headers = {
-            "Content-Type": "application/json",
-            "AppId": APP_ID,
-            "Timestamp": str(ts),
-            "Signature": signature
-        }
-
-        r = requests.post(API_URL, json={"query": query}, headers=headers, timeout=10)
-        print("STATUS:", r.status_code)
-        print("RAW RESPONSE:", r.text)
-        
-        data = r.json()
-
-        return data["data"]["generateShortLink"]["shortLink"]
-
-    except Exception as e:
-        print("API ERROR:", e)
-        return None
-
-# =====================
-# TELEGRAM HANDLER
-# =====================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send Shopee links (up to 5).")
-
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    links = extract_links(update.message.text)
-
-    if not links:
-        await update.message.reply_text("⚠️ Please send Shopee links only.")
-        return
-
+# ======================
+# PROCESS
+# ======================
+def process(text):
+    links = extract_links(text)
     results = []
 
     for link in links[:5]:
-        resolved = resolve(link)
+        expanded = expand_link(link)
+        affiliate = make_affiliate(expanded)
+        results.append(affiliate)
 
-        short = generate_short_link(resolved)
+    return results
 
-        if short:
-            results.append(short)
-        else:
-            results.append(f"❌ Failed: {link}")
+# ======================
+# HANDLERS
+# ======================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Send me Shopee links and I’ll convert them 🔗")
+
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+
+    links = extract_links(text)
+
+    if not links:
+        await update.message.reply_text("Please send a Shopee link.")
+        return
+
+    results = process(text)
 
     await update.message.reply_text("\n\n".join(results))
 
-# =====================
+# ======================
 # MAIN
-# =====================
+# ======================
 def main():
+    print("TOKEN:", TELEGRAM_TOKEN)
+    print("APP_ID:", AFFILIATE_ID)
+
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
