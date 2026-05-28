@@ -56,20 +56,24 @@ def generate_signature(app_id: str, app_secret: str, timestamp: int):
 # ======================
 # SHOPEE AFFILIATE SHORT LINK API
 # ======================
-def generate_short_link(url: str):
-    timestamp = int(time.time())
-    sign = generate_signature(APP_ID, APP_SECRET, timestamp)
+import hashlib
+import time
+import requests
 
-    query = """
-    mutation generateShortLink($originUrl: String!) {
-        generateShortLink(originUrl: $originUrl) {
-            shortLink
-        }
-    }
-    """
+def generate_short_link(url: str):
+    timestamp = str(int(time.time()))
+
+    raw = APP_ID + timestamp + APP_SECRET
+    signature = hashlib.sha256(raw.encode()).hexdigest()
 
     payload = {
-        "query": query,
+        "query": """
+        mutation generateShortLink($originUrl: String!) {
+            generateShortLink(originUrl: $originUrl) {
+                shortLink
+            }
+        }
+        """,
         "operationName": "generateShortLink",
         "variables": {
             "originUrl": url
@@ -78,9 +82,7 @@ def generate_short_link(url: str):
 
     headers = {
         "Content-Type": "application/json",
-        "AppId": APP_ID,
-        "Timestamp": str(timestamp),
-        "Signature": sign,
+        "Authorization": f"SHA256 Credential={APP_ID},Timestamp={timestamp},Signature={signature}"
     }
 
     r = requests.post(
@@ -93,7 +95,6 @@ def generate_short_link(url: str):
     print("STATUS:", r.status_code)
     print("RAW RESPONSE:", r.text)
 
-    # Safe parsing (prevents crashes)
     try:
         data = r.json()
 
@@ -103,8 +104,7 @@ def generate_short_link(url: str):
 
         return data["data"]["generateShortLink"]["shortLink"]
 
-    except Exception as e:
-        print("PARSE ERROR:", e)
+    except:
         return None
     
 # ======================
@@ -148,7 +148,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     results = process_links(text)
 
-    await update.message.reply_text("\n\n".join(results))
+    await update.message.reply_text("\n\n".join([r for r in results if r]))
 
 
 # ======================
