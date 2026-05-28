@@ -48,14 +48,14 @@ def generate_sign(timestamp: int):
 # ======================
 # SHOPEE AFFILIATE CALL
 # ======================
-def generate_affiliate_link(url: str):
+def generate_affiliate_link(original_url: str):
     try:
         timestamp = int(time.time())
         sign = generate_sign(timestamp)
 
         query = f"""
         mutation {{
-          generateShortLink(originUrl: "{url}") {{
+          generateShortLink(originUrl: "{original_url}") {{
             shortLink
           }}
         }}
@@ -75,17 +75,12 @@ def generate_affiliate_link(url: str):
             timeout=10
         )
 
+        print("STATUS:", response.status_code)
+        print("RAW RESPONSE:", response.text)
+
         data = response.json()
 
-        # SAFE extraction
-        result = data.get("data", {}).get("generateShortLink", {})
-        short_link = result.get("shortLink")
-
-        # fallback safety
-        if short_link:
-            return short_link
-
-        return None
+        return data["data"]["generateShortLink"]["shortLink"]
 
     except Exception as e:
         print("API ERROR:", e)
