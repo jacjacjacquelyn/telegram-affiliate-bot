@@ -122,7 +122,7 @@ def process(text):
 # HANDLERS
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send Shopee links and I’ll convert them 🔗")
+    await update.message.reply_text("Send me your shopee link(s) and I’ll convert them 🔗. I can convert up to 5 links at a go.")
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,7 +131,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     links = extract_links(text)
 
     if not links:
-        await update.message.reply_text("⚠️ Please send a Shopee link.")
+        await update.message.reply_text("I only recognise a shopee link!")
         return
 
     results = process(text)
@@ -140,7 +140,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = [r for r in results if r]
 
     if not results:
-        await update.message.reply_text("⚠️ Could not generate affiliate link.")
+        await update.message.reply_text("Bumped into some error! Do DM the links via IG or telegram to @jacquelynedna instead.")
         return
 
     await update.message.reply_text("\n\n".join(results))
