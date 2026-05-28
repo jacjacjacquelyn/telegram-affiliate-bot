@@ -23,6 +23,17 @@ def extract_links(text: str, limit=5):
     return re.findall(r"https?://[^\s]+", text)[:limit]
 
 # ======================
+# RESOLVE SHORT SHOPEE LINKS
+# ======================
+def resolve_shopee_url(url: str):
+    try:
+        response = requests.head(url, allow_redirects=True, timeout=10)
+        return response.url
+    except Exception as e:
+        print("RESOLVE ERROR:", e)
+        return url
+
+# ======================
 # SIGNATURE (SHOPEE)
 # ======================
 def generate_sign(timestamp: int):
@@ -33,6 +44,7 @@ def generate_sign(timestamp: int):
         hashlib.sha256
     ).hexdigest()
 
+    
 # ======================
 # SHOPEE AFFILIATE CALL
 # ======================
@@ -116,9 +128,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = []
 
     for link in links:
-        affiliate = generate_affiliate_link(link)
+        real_url = resolve_shopee_url(link)
+        affiliate = generate_affiliate_link(real_url)
+
         if affiliate:
-            results.append(affiliate)
+           results.append(affiliate)
 
     if not results:
         await update.message.reply_text("⚠️ Could not generate affiliate links.")
