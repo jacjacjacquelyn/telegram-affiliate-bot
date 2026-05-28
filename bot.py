@@ -57,14 +57,23 @@ def generate_signature(app_id: str, app_secret: str, timestamp: int):
 # SHOPEE AFFILIATE SHORT LINK API
 # ======================
 def generate_short_link(url: str):
-    if not APP_ID or not APP_SECRET:
-        raise ValueError("Missing credentials")
-
     timestamp = int(time.time())
     sign = generate_signature(APP_ID, APP_SECRET, timestamp)
 
+    query = """
+    mutation generateShortLink($originUrl: String!) {
+        generateShortLink(originUrl: $originUrl) {
+            shortLink
+        }
+    }
+    """
+
     payload = {
-        "origin_url": url
+        "query": query,
+        "operationName": "generateShortLink",
+        "variables": {
+            "originUrl": url
+        }
     }
 
     headers = {
@@ -75,7 +84,7 @@ def generate_short_link(url: str):
     }
 
     r = requests.post(
-        "https://affiliate.shopee.sg/api/v2/short_link/generate",
+        "https://open-api.affiliate.shopee.sg/graphql",
         json=payload,
         headers=headers,
         timeout=10
@@ -84,9 +93,19 @@ def generate_short_link(url: str):
     print("STATUS:", r.status_code)
     print("RAW RESPONSE:", r.text)
 
-    data = r.json()
+    # Safe parsing (prevents crashes)
+    try:
+        data = r.json()
 
-    return data.get("short_link")
+        if "errors" in data:
+            print("SHOPEE ERROR:", data["errors"])
+            return None
+
+        return data["data"]["generateShortLink"]["shortLink"]
+
+    except Exception as e:
+        print("PARSE ERROR:", e)
+        return None
     
 # ======================
 # PROCESS LINKS
