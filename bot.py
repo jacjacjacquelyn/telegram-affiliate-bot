@@ -1,39 +1,33 @@
 import os
 import re
 import time
-import hmac
+import json
 import hashlib
 import requests
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # ======================
-# ENV VARIABLES (RAILWAY)
+# ENV VARIABLES
 # ======================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
 
-GRAPHQL_ENDPOINT = "https://affiliate.shopee.sg/api/v2/short_link/generate"
+GRAPHQL_URL = "https://open-api.affiliate.shopee.sg/graphql"
 
 
 # ======================
-# VALIDATION
+# EXTRACT LINKS
 # ======================
-def extract_links(text: str):
+def extract_links(text):
     return re.findall(r"https?://[^\s]+", text or "")
 
 
 # ======================
-# EXPAND SHORT LINKS (sg.shp.ee / s.shopee.sg)
+# EXPAND SHORT LINKS
 # ======================
-def expand_link(url: str):
+def expand_link(url):
     try:
         r = requests.get(url, allow_redirects=True, timeout=10)
         return r.url
@@ -42,29 +36,23 @@ def expand_link(url: str):
 
 
 # ======================
-# SIGNATURE (SHOPEE API)
+# SHOPEE SIGNATURE (PER OFFICIAL DOC)
+# SHA256(AppId + Timestamp + Payload + Secret)
 # ======================
-def generate_signature(app_id: str, app_secret: str, timestamp: int):
-    base_string = f"{app_id}{timestamp}"
-    return hmac.new(
-        app_secret.encode(),
-        base_string.encode(),
-        hashlib.sha256,
-    ).hexdigest()
+def generate_signature(app_id, timestamp, payload_str, secret):
+    raw = app_id + timestamp + payload_str + secret
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 # ======================
-# SHOPEE AFFILIATE SHORT LINK API
+# SHOPEE API CALL
 # ======================
-import hashlib
-import time
-import requests
-
 def generate_short_link(url: str):
-    timestamp = str(int(time.time()))
+    if not APP_ID or not APP_SECRET:
+        print("Missing APP_ID or APP_SECRET")
+        return None
 
-    raw = APP_ID + timestamp + APP_SECRET
-    signature = hashlib.sha256(raw.encode()).hexdigest()
+    timestamp = str(int(time.time()))
 
     payload = {
         "query": """
@@ -80,14 +68,19 @@ def generate_short_link(url: str):
         }
     }
 
+    # MUST match EXACT payload used in signature
+    payload_str = json.dumps(payload, separators=(',', ':'))
+
+    signature = generate_signature(APP_ID, timestamp, payload_str, APP_SECRET)
+
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={APP_ID},Timestamp={timestamp},Signature={signature}"
+        "Authorization": f"SHA256 Credential={APP_ID}, Timestamp={timestamp}, Signature={signature}"
     }
 
     r = requests.post(
-        "https://open-api.affiliate.shopee.sg/graphql",
-        json=payload,
+        GRAPHQL_URL,
+        data=payload_str,
         headers=headers,
         timeout=10
     )
@@ -104,37 +97,34 @@ def generate_short_link(url: str):
 
         return data["data"]["generateShortLink"]["shortLink"]
 
-    except:
+    except Exception as e:
+        print("PARSE ERROR:", e)
         return None
-    
+
+
 # ======================
 # PROCESS LINKS
 # ======================
-def process_links(text: str):
+def process(text):
     links = extract_links(text)
     results = []
 
     for link in links[:5]:
         expanded = expand_link(link)
 
-        try:
-            short_link = generate_short_link(expanded)
-            results.append(short_link)
-        except Exception as e:
-            print("API ERROR:", e)
-            results.append(f"❌ Failed: {link}")
+        affiliate = generate_short_link(expanded)
+
+        if affiliate:
+            results.append(affiliate)
 
     return results
 
 
 # ======================
-# TELEGRAM HANDLERS
+# HANDLERS
 # ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Send Shopee links (sg.shp.ee / s.shopee.sg / product links)\n"
-        "I’ll convert them into affiliate short links 🔗"
-    )
+    await update.message.reply_text("Send Shopee links and I’ll convert them 🔗")
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -143,20 +133,25 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     links = extract_links(text)
 
     if not links:
-        await update.message.reply_text("⚠️ Please send Shopee links only.")
+        await update.message.reply_text("⚠️ Please send a Shopee link.")
         return
 
-    results = process_links(text)
+    results = process(text)
 
-    await update.message.reply_text("\n\n".join([r for r in results if r]))
+    # SAFE OUTPUT (prevents empty message crash)
+    results = [r for r in results if r]
+
+    if not results:
+        await update.message.reply_text("⚠️ Could not generate affiliate link.")
+        return
+
+    await update.message.reply_text("\n\n".join(results))
 
 
 # ======================
 # MAIN
 # ======================
 def main():
-    print("Bot starting...")
-
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
