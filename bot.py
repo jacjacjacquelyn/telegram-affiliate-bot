@@ -1,61 +1,59 @@
 import os
 import re
+import requests
 import time
 import hmac
 import hashlib
-import requests
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# ======================
-# ENV VARIABLES (RAILWAY)
-# ======================
+# =====================
+# ENV
+# =====================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-APP_ID = os.getenv("SHOPEE_APP_ID")
-APP_SECRET = os.getenv("SHOPEE_SECRET")
+APP_ID = os.getenv("APP_ID")
+APP_SECRET = os.getenv("APP_SECRET")
 
-GRAPHQL_ENDPOINT = "https://affiliate.shopee.sg/open_api/graphql"
+API_URL = "https://affiliate.shopee.sg/open_api/graphql"
 
-# ======================
-# CLEAN LINK EXTRACTION
-# ======================
-def extract_links(text: str, limit=5):
-    return re.findall(r"https?://[^\s]+", text)[:limit]
+# =====================
+# EXTRACT LINKS
+# =====================
+def extract_links(text):
+    return re.findall(r"https?://[^\s]+", text or "")
 
-# ======================
-# RESOLVE SHORT SHOPEE LINKS
-# ======================
-def resolve_shopee_url(url: str):
+# =====================
+# RESOLVE SHORT LINK
+# =====================
+def resolve(url):
     try:
-        response = requests.head(url, allow_redirects=True, timeout=10)
-        return response.url
-    except Exception as e:
-        print("RESOLVE ERROR:", e)
+        r = requests.get(url, allow_redirects=True, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        return r.url
+    except:
         return url
 
-# ======================
-# SIGNATURE (SHOPEE)
-# ======================
-def generate_sign(timestamp: int):
-    base_string = f"{APP_ID}{timestamp}"
+# =====================
+# SIGNATURE
+# =====================
+def sign(timestamp: int):
+    base = f"{APP_ID}{timestamp}"
     return hmac.new(
         APP_SECRET.encode(),
-        base_string.encode(),
+        base.encode(),
         hashlib.sha256
     ).hexdigest()
 
-    
-# ======================
-# SHOPEE AFFILIATE CALL
-# ======================
-def generate_affiliate_link(original_url: str):
+# =====================
+# SHOPEE SHORT LINK API
+# =====================
+def generate_short_link(url: str):
     try:
-        timestamp = int(time.time())
-        sign = generate_sign(timestamp)
+        ts = int(time.time())
+        signature = sign(ts)
 
         query = f"""
         mutation {{
-          generateShortLink(originUrl: "{original_url}") {{
+          generateShortLink(originUrl: "{url}") {{
             shortLink
           }}
         }}
@@ -64,21 +62,15 @@ def generate_affiliate_link(original_url: str):
         headers = {
             "Content-Type": "application/json",
             "AppId": APP_ID,
-            "Timestamp": str(timestamp),
-            "Signature": sign
+            "Timestamp": str(ts),
+            "Signature": signature
         }
 
-        response = requests.post(
-            GRAPHQL_ENDPOINT,
-            json={"query": query},
-            headers=headers,
-            timeout=10
-        )
-
-        print("STATUS:", response.status_code)
-        print("RAW RESPONSE:", response.text)
-
-        data = response.json()
+        r = requests.post(API_URL, json={"query": query}, headers=headers, timeout=10)
+        print("STATUS:", r.status_code)
+        print("RAW RESPONSE:", r.text)
+        
+        data = r.json()
 
         return data["data"]["generateShortLink"]["shortLink"]
 
@@ -86,63 +78,40 @@ def generate_affiliate_link(original_url: str):
         print("API ERROR:", e)
         return None
 
-# ======================
-# FORMAT FOR CREATORS (OPTIONAL UPGRADE)
-# ======================
-def format_for_creators(links):
-    output = ["🛍️ Affiliate Picks:\n"]
-
-    for i, link in enumerate(links, 1):
-        output.append(f"{i}. 🔗 {link}")
-
-    output.append("\n✨ Save & share this list")
-    return "\n".join(output)
-
-# ======================
-# TELEGRAM HANDLERS
-# ======================
+# =====================
+# TELEGRAM HANDLER
+# =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Send me up to 5 Shopee links and I’ll convert them into affiliate short links 🔗"
-    )
+    await update.message.reply_text("Send Shopee links (up to 5).")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-
-    links = extract_links(text)
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    links = extract_links(update.message.text)
 
     if not links:
-        await update.message.reply_text("⚠️ No valid links found.")
+        await update.message.reply_text("⚠️ Please send Shopee links only.")
         return
 
     results = []
 
-    for link in links:
-        real_url = resolve_shopee_url(link)
-        affiliate = generate_affiliate_link(real_url)
+    for link in links[:5]:
+        resolved = resolve(link)
 
-        if affiliate:
-           results.append(affiliate)
+        short = generate_short_link(resolved)
 
-    if not results:
-        await update.message.reply_text("⚠️ Could not generate affiliate links.")
-        return
+        if short:
+            results.append(short)
+        else:
+            results.append(f"❌ Failed: {link}")
 
-    # ======================
-    # CREATOR MODE OUTPUT
-    # ======================
-    message = format_for_creators(results)
+    await update.message.reply_text("\n\n".join(results))
 
-    await update.message.reply_text(message)
-
-# ======================
-# MAIN APP
-# ======================
+# =====================
+# MAIN
+# =====================
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
     print("Bot running...")
     app.run_polling()
